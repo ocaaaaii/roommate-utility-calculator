@@ -75,11 +75,14 @@ st.markdown(
         padding: 0.9rem 1.2rem;
     }
 
-    div[data-testid="stMetric"] label {
+    /* 用萬用選擇器涵蓋卡片內所有子元素（含 label、標題標籤等），避免被全域 h1-h5 規則蓋掉 */
+    div[data-testid="stMetric"],
+    div[data-testid="stMetric"] * {
         color: var(--gray-brown) !important;
     }
 
-    div[data-testid="stMetricValue"] {
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"],
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] * {
         color: var(--morandi-green-deep) !important;
     }
 
