@@ -195,7 +195,7 @@ with st.form("bill_form"):
     for i, (room_id, room) in enumerate(rooms.items()):
         with reading_cols[i % 3]:
             new_readings[room_id] = st.number_input(
-                f"{room_id} {room.name}（初始 {room.initial_reading:g}）",
+                f"{room_id}（初始 {room.initial_reading:g}）",
                 min_value=float(room.initial_reading),
                 value=float(room.initial_reading),
                 step=1.0,
@@ -249,7 +249,6 @@ if "summary" in st.session_state:
     rows = [
         {
             "房號": room_id,
-            "室友": info["name"],
             "人數": info["headcount"],
             "入住天數": info["occupied_days"],
             "用電度數": info["electricity_usage_kwh"],

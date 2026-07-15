@@ -237,7 +237,7 @@ def generate_line_message(
         if room_id.startswith("__"):
             continue
         lines.append(
-            f"- {room_id} {info['name']}：電費 ${info['electricity_fee']:,.0f} "
+            f"- {room_id}：電費 ${info['electricity_fee']:,.0f} "
             f"+ 水費 ${info['water_fee']:,.0f} = 總計 ${info['total']:,.0f}"
         )
 
@@ -253,4 +253,4 @@ if __name__ == "__main__":
     rooms, billing_end_date = load_rooms_config()
     room_3a = rooms["3A"]
     days_3a = calculate_occupied_days(room_3a.move_in_date, billing_end_date)
-    print(f"3A {room_3a.name} 從 {room_3a.move_in_date} 入住到 {billing_end_date} 共 {days_3a} 天")
+    print(f"3A 從 {room_3a.move_in_date} 入住到 {billing_end_date} 共 {days_3a} 天")

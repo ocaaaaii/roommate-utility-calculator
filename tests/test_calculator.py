@@ -292,7 +292,7 @@ class TestGenerateLineMessage(unittest.TestCase):
             if room_id.startswith("__"):
                 continue
             self.assertIn(room_id, message)
-            self.assertIn(info["name"], message)
+            self.assertNotIn(info["name"], message)
             self.assertIn(f"{info['total']:,.0f}", message)
 
         self.assertIn("1234-5678-9999", message)
