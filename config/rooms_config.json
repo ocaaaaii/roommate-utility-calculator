@@ -3,38 +3,44 @@
   "rooms": {
     "3A": {
       "name": "吳小姐（小幫手）",
-      "initial_reading": 493,
+      "initial_reading": 49,
       "move_in_date": "2026-07-09",
+      "move_out_date": "2027-06-30",
       "headcount": 1
     },
     "3B": {
       "name": "林小姐",
-      "initial_reading": 1069,
+      "initial_reading": 106,
       "move_in_date": "2026-06-18",
+      "move_out_date": "2027-06-18",
       "headcount": 1
     },
     "4C": {
       "name": "柯先生",
-      "initial_reading": 4582,
+      "initial_reading": 458,
       "move_in_date": "2026-05-29",
+      "move_out_date": "2027-05-31",
       "headcount": 1
     },
     "4D": {
       "name": "姚小姐/金先生",
-      "initial_reading": 541,
+      "initial_reading": 54,
       "move_in_date": "2026-07-04",
+      "move_out_date": "2027-06-26",
       "headcount": 2
     },
     "5E": {
       "name": "甘小姐/王先生",
-      "initial_reading": 4180,
+      "initial_reading": 418,
       "move_in_date": "2026-05-25",
+      "move_out_date": "2027-05-23",
       "headcount": 2
     },
     "6F": {
       "name": "劉小姐",
-      "initial_reading": 3575,
+      "initial_reading": 357,
       "move_in_date": "2026-05-29",
+      "move_out_date": "2027-05-29",
       "headcount": 1
     }
   }

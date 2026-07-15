@@ -154,10 +154,16 @@ st.markdown("---")
 
 with st.form("bill_form"):
     st.markdown('<span class="section-tag">帳單金額</span>', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
+    col1, col1b, col2, col3 = st.columns(4)
     with col1:
         total_electricity_bill = st.number_input(
             "台電總電費 (元)", min_value=0.0, step=100.0, value=0.0
+        )
+    with col1b:
+        unit_price = st.number_input(
+            "當期每度電價 (元/度)", min_value=0.0, step=0.1, value=0.0,
+            help="以台電帳單上的每度電價填入，用來計算各房自家用電費用；"
+            "總電費扣除各房自家用電費後的公電（公共用電）將依人數比例分攤。",
         )
     with col2:
         total_water_base_fee = st.number_input(
@@ -211,11 +217,12 @@ with st.form("bill_form"):
     submitted = st.form_submit_button("開始計算分帳")
 
 if submitted:
-    full_period_days = (billing_end_date - billing_period_start).days
+    full_period_days = (billing_end_date - billing_period_start).days + 1
     summary = calculate_all(
         rooms,
         billing_end_date,
         new_readings,
+        unit_price,
         total_electricity_bill,
         total_water_base_fee,
         total_water_usage_fee,
@@ -231,8 +238,13 @@ if submitted:
 if "summary" in st.session_state:
     summary = st.session_state["summary"]
     landlord_absorbed = summary.get("__landlord_absorbed_base_fee__", 0.0)
+    public_electricity = summary.get("__public_electricity__", 0.0)
 
     st.markdown("## 分帳結果")
+    st.caption(
+        f"本期公電（公共用電）總額約 ${public_electricity:,.0f}，"
+        "已依各房人數比例分攤進電費欄位；水費與電費最終金額四捨五入到整數元。"
+    )
 
     rows = [
         {
@@ -240,9 +252,9 @@ if "summary" in st.session_state:
             "室友": info["name"],
             "人數": info["headcount"],
             "入住天數": info["occupied_days"],
+            "用電度數": info["electricity_usage_kwh"],
             "電費": info["electricity_fee"],
-            "水費基本費": info["water_base_fee"],
-            "實際水費": info["water_usage_fee"],
+            "水費": info["water_fee"],
             "總計": info["total"],
         }
         for room_id, info in summary.items()
@@ -254,8 +266,7 @@ if "summary" in st.session_state:
         df.style.format(
             {
                 "電費": "${:,.0f}",
-                "水費基本費": "${:,.0f}",
-                "實際水費": "${:,.0f}",
+                "水費": "${:,.0f}",
                 "總計": "${:,.0f}",
             }
         ),
