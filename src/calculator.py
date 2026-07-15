@@ -236,8 +236,9 @@ def generate_line_message(
     for room_id, info in summary.items():
         if room_id.startswith("__"):
             continue
+        headcount_note = f"（{info['headcount']}人）" if info["headcount"] == 2 else ""
         lines.append(
-            f"- {room_id}：電費 ${info['electricity_fee']:,.0f} "
+            f"- {room_id}{headcount_note}：電費 ${info['electricity_fee']:,.0f} "
             f"+ 水費 ${info['water_fee']:,.0f} = 總計 ${info['total']:,.0f}"
         )
 

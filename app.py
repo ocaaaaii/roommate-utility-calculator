@@ -194,8 +194,9 @@ with st.form("bill_form"):
     reading_cols = st.columns(3)
     for i, (room_id, room) in enumerate(rooms.items()):
         with reading_cols[i % 3]:
+            headcount_note = f"（{room.headcount}人）" if room.headcount == 2 else ""
             new_readings[room_id] = st.number_input(
-                f"{room_id}（初始 {room.initial_reading:g}）",
+                f"{room_id}{headcount_note}（初始 {room.initial_reading:g}）",
                 min_value=float(room.initial_reading),
                 value=float(room.initial_reading),
                 step=1.0,
