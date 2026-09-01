@@ -2,8 +2,9 @@
 
 對應 skill.md 階段二、三：表單輸入 + 分帳結果表格 + 一鍵複製 LINE 通知文字。
 """
+import json
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -144,12 +145,54 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
+# 歷史紀錄（下載/上傳 JSON 檔案；app 重新部署時伺服器上的資料不會保留）
+# ---------------------------------------------------------------------------
+def _period_key(record: dict) -> tuple:
+    return (
+        record["water_period_start"],
+        record["water_period_end"],
+        record["electricity_period_start"],
+        record["electricity_period_end"],
+    )
+
+
+def _merge_history(records: list[dict]) -> None:
+    """把 records 併入 st.session_state['history']，同一期（四個期間欄位相同）會被覆蓋更新，不會重複累加。"""
+    existing = {_period_key(r): i for i, r in enumerate(st.session_state["history"])}
+    for r in records:
+        key = _period_key(r)
+        if key in existing:
+            st.session_state["history"][existing[key]] = r
+        else:
+            st.session_state["history"].append(r)
+            existing[key] = len(st.session_state["history"]) - 1
+
+
+if "history" not in st.session_state:
+    st.session_state["history"] = []
+
+# ---------------------------------------------------------------------------
 # 資料
 # ---------------------------------------------------------------------------
 rooms, _ = load_rooms_config()
 
 st.markdown("# 葫洲美好際寓 水電分帳試算")
 st.caption("透天厝分租套房水電分帳小工具 — 電費依用電量分攤，水費依天數與人數加權分攤。")
+
+st.markdown('<span class="section-tag">歷史紀錄</span>', unsafe_allow_html=True)
+st.caption(
+    "app 重新部署或閒置太久重啟時，伺服器上的資料會清空，歷史紀錄請自行下載保存。"
+    "下次要接續使用時，把上次下載的檔案上傳回來，之前算過的期數就會全部帶回來。"
+)
+uploaded_history = st.file_uploader(
+    "上傳先前下載的歷史紀錄（JSON，選填）", type="json", key="history_upload"
+)
+if uploaded_history is not None:
+    try:
+        loaded = json.load(uploaded_history)
+        _merge_history(loaded.get("records", []))
+    except (json.JSONDecodeError, AttributeError, KeyError):
+        st.error("這個檔案看起來不是有效的歷史紀錄 JSON，請確認上傳的檔案內容。")
 
 st.markdown("---")
 
@@ -310,6 +353,47 @@ if submitted:
     st.session_state["remittance_account"] = remittance_account
     st.session_state["due_date"] = due_date
 
+    tenant_total = sum(
+        info["total"] for room_id, info in summary.items() if not room_id.startswith("__")
+    )
+    record = {
+        "recorded_at": datetime.now().isoformat(timespec="seconds"),
+        "water_period_start": water_period_start.isoformat(),
+        "water_period_end": water_period_end.isoformat(),
+        "electricity_period_start": electricity_period_start.isoformat(),
+        "electricity_period_end": electricity_period_end.isoformat(),
+        "meter_reading_date": meter_reading_date.isoformat(),
+        "inputs": {
+            "total_electricity_bill": total_electricity_bill,
+            "unit_price": unit_price,
+            "total_water_base_fee": total_water_base_fee,
+            "water_usage_fee": water_usage_fee,
+            "water_conservation_fee": water_conservation_fee,
+            "initial_readings": initial_readings,
+            "new_readings": new_readings,
+        },
+        "rooms": {
+            room_id: {
+                "contract_date": o["contract_date"].isoformat(),
+                "move_in_date": o["move_in_date"].isoformat(),
+                "move_out_date": o["move_out_date"].isoformat() if o["move_out_date"] else None,
+                "headcount": o["headcount"],
+            }
+            for room_id, o in room_overrides.items()
+        },
+        "results": {
+            room_id: {k: v for k, v in info.items() if k != "name"}
+            for room_id, info in summary.items()
+            if not room_id.startswith("__")
+        },
+        "totals": {
+            "tenant_total": tenant_total,
+            "landlord_absorbed": summary["__landlord_absorbed_base_fee__"],
+            "public_electricity": summary["__public_electricity__"],
+        },
+    }
+    _merge_history([record])
+
 if "summary" in st.session_state:
     summary = st.session_state["summary"]
     landlord_absorbed = summary.get("__landlord_absorbed_base_fee__", 0.0)
@@ -372,3 +456,39 @@ if "summary" in st.session_state:
         meter_reading_date=st.session_state["meter_reading_date"],
     )
     st.code(message, language=None)
+
+st.markdown("---")
+st.markdown('<span class="section-tag">歷史紀錄</span>', unsafe_allow_html=True)
+if st.session_state["history"]:
+    history_rows = sorted(
+        st.session_state["history"], key=lambda r: r["water_period_start"], reverse=True
+    )
+    history_df = pd.DataFrame(
+        [
+            {
+                "水費期間": f"{r['water_period_start']} ~ {r['water_period_end']}",
+                "電費期間": f"{r['electricity_period_start']} ~ {r['electricity_period_end']}",
+                "室友應繳總額": r["totals"]["tenant_total"],
+                "房東吸收": r["totals"]["landlord_absorbed"],
+                "計算時間": r["recorded_at"],
+            }
+            for r in history_rows
+        ]
+    )
+    st.dataframe(
+        history_df.style.format({"室友應繳總額": "${:,.0f}", "房東吸收": "${:,.0f}"}),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    history_json = json.dumps(
+        {"records": st.session_state["history"]}, ensure_ascii=False, indent=2
+    )
+    st.download_button(
+        "下載歷史紀錄（JSON）",
+        data=history_json,
+        file_name="roommate_utility_history.json",
+        mime="application/json",
+    )
+else:
+    st.caption("目前沒有歷史紀錄。算完一期並送出後，這裡會自動出現該期的紀錄。")
