@@ -5,6 +5,7 @@ from src.calculator import (
     Room,
     calculate_all,
     calculate_electricity,
+    calculate_electricity_usage_days,
     calculate_occupied_days,
     calculate_water_base_fee,
     calculate_water_usage_fee,
@@ -46,52 +47,85 @@ class TestOccupiedDays(unittest.TestCase):
         self.assertEqual(calculate_occupied_days(move_in_date, billing_end_date), 0)
 
 
+class TestElectricityUsageDays(unittest.TestCase):
+    def test_uses_period_start_when_contract_predates_period(self):
+        """簽約日早於電費帳單起始日 -> 從帳單起始日算到結束日（不 +1）。"""
+        days = calculate_electricity_usage_days(
+            contract_date=date(2026, 1, 1),
+            electricity_period_start=date(2026, 6, 17),
+            electricity_period_end=date(2026, 8, 18),
+        )
+        self.assertEqual(days, (date(2026, 8, 18) - date(2026, 6, 17)).days)
+
+    def test_uses_contract_date_when_signed_mid_period(self):
+        """簽約日晚於電費帳單起始日 -> 從簽約日算到結束日。"""
+        days = calculate_electricity_usage_days(
+            contract_date=date(2026, 6, 24),
+            electricity_period_start=date(2026, 6, 17),
+            electricity_period_end=date(2026, 8, 18),
+        )
+        self.assertEqual(days, (date(2026, 8, 18) - date(2026, 6, 24)).days)
+
+
 class TestElectricitySplit(unittest.TestCase):
     def setUp(self):
         # 三間房，用電量分別為 50 / 60 / 90 度，人數 1/1/2。
+        # A、B 簽約日早於電費期間起始日 -> 用滿整個期間（30天）；
+        # C 簽約日在期間中途（1/16）-> 只用期間後半（15天）。
+        self.electricity_period_start = date(2026, 1, 1)
+        self.electricity_period_end = date(2026, 1, 31)
         self.rooms = {
-            "A": Room("A", "Room A", initial_reading=100, move_in_date=date(2026, 1, 1), headcount=1),
-            "B": Room("B", "Room B", initial_reading=200, move_in_date=date(2026, 1, 1), headcount=1),
-            "C": Room("C", "Room C", initial_reading=300, move_in_date=date(2026, 1, 1), headcount=2),
+            "A": Room("A", "Room A", 100, date(2025, 12, 1), date(2025, 12, 1), 1),
+            "B": Room("B", "Room B", 200, date(2025, 12, 1), date(2025, 12, 1), 1),
+            "C": Room("C", "Room C", 300, date(2026, 1, 16), date(2026, 1, 16), 2),
         }
+        self.initial_readings = {"A": 100, "B": 200, "C": 300}
         self.new_readings = {"A": 150, "B": 260, "C": 390}
+
+    def _run(self):
+        return calculate_electricity(
+            self.rooms,
+            self.initial_readings,
+            self.new_readings,
+            unit_price=8.0,
+            total_electricity_bill=2000.0,
+            electricity_period_start=self.electricity_period_start,
+            electricity_period_end=self.electricity_period_end,
+        )
 
     def test_metered_fee_uses_given_unit_price_not_derived_from_bill(self):
         """電價是直接輸入值（比照台電帳單），不是用總電費/總用電量反推。"""
-        result = calculate_electricity(
-            self.rooms, self.new_readings, unit_price=8.0, total_electricity_bill=2000.0
-        )
+        result = self._run()
 
         self.assertEqual(result["A"]["usage_kwh"], 50)
         self.assertAlmostEqual(result["A"]["metered_fee"], 400.0)
         self.assertAlmostEqual(result["B"]["metered_fee"], 480.0)
         self.assertAlmostEqual(result["C"]["metered_fee"], 720.0)
 
-    def test_public_electricity_is_remainder_split_by_headcount(self):
-        """總電費扣除各房自家電費後的「公電」，依人數比例分攤。"""
-        result = calculate_electricity(
-            self.rooms, self.new_readings, unit_price=8.0, total_electricity_bill=2000.0
-        )
+    def test_usage_days_from_contract_date(self):
+        result = self._run()
 
-        # 自家電費合計 1600，公電 = 2000-1600 = 400；人數比例 1:1:2（共4人）
+        self.assertEqual(result["A"]["usage_days"], 30)  # 簽約日早於期間 -> 整期間
+        self.assertEqual(result["B"]["usage_days"], 30)
+        self.assertEqual(result["C"]["usage_days"], 15)  # 1/16 簽約 -> 只剩後半期間
+
+    def test_public_electricity_is_remainder_split_by_headcount_times_days(self):
+        """總電費扣除各房自家電費後的「公電」，依「人數 x 電費計費天數」比例分攤。"""
+        result = self._run()
+
+        # 自家電費合計 1600，公電 = 2000-1600 = 400
         self.assertAlmostEqual(result["__public_electricity__"], 400.0)
-        self.assertAlmostEqual(result["A"]["public_electricity_share"], 100.0)
-        self.assertAlmostEqual(result["B"]["public_electricity_share"], 100.0)
-        self.assertAlmostEqual(result["C"]["public_electricity_share"], 200.0)
+        # 權重：A=1*30=30, B=1*30=30, C=2*15=30，三房權重相同 -> 平分公電
+        self.assertAlmostEqual(result["A"]["public_electricity_share"], 133.333, places=2)
+        self.assertAlmostEqual(result["B"]["public_electricity_share"], 133.333, places=2)
+        self.assertAlmostEqual(result["C"]["public_electricity_share"], 133.333, places=2)
 
-    def test_final_fee_rounded_and_sums_to_bill(self):
-        result = calculate_electricity(
-            self.rooms, self.new_readings, unit_price=8.0, total_electricity_bill=2000.0
-        )
+    def test_final_fee_rounded(self):
+        result = self._run()
 
-        self.assertEqual(result["A"]["electricity_fee"], 500)
-        self.assertEqual(result["B"]["electricity_fee"], 580)
-        self.assertEqual(result["C"]["electricity_fee"], 920)
-
-        total_fees = sum(
-            info["electricity_fee"] for key, info in result.items() if not key.startswith("__")
-        )
-        self.assertEqual(total_fees, 2000)
+        self.assertEqual(result["A"]["electricity_fee"], 533)
+        self.assertEqual(result["B"]["electricity_fee"], 613)
+        self.assertEqual(result["C"]["electricity_fee"], 853)
 
 
 class TestWaterBaseFeeSplit(unittest.TestCase):
@@ -99,7 +133,7 @@ class TestWaterBaseFeeSplit(unittest.TestCase):
         # 6 間房，入住天數分別為 10/20/30/15/25/5 天，滿額天數為 30 天。
         headcounts = {"A": 1, "B": 1, "C": 1, "D": 2, "E": 2, "F": 1}
         self.rooms = {
-            room_id: Room(room_id, room_id, 0, date(2026, 1, 1), hc)
+            room_id: Room(room_id, room_id, 0, date(2026, 1, 1), date(2026, 1, 1), hc)
             for room_id, hc in headcounts.items()
         }
         self.occupied_days = {"A": 10, "B": 20, "C": 30, "D": 15, "E": 25, "F": 5}
@@ -125,7 +159,7 @@ class TestWaterUsageFeeSplit(unittest.TestCase):
         # D、E 為雙人房（headcount=2），用來驗證人數 x 天數的加權邏輯。
         headcounts = {"A": 1, "B": 1, "C": 1, "D": 2, "E": 2, "F": 1}
         self.rooms = {
-            room_id: Room(room_id, room_id, 0, date(2026, 1, 1), hc)
+            room_id: Room(room_id, room_id, 0, date(2026, 1, 1), date(2026, 1, 1), hc)
             for room_id, hc in headcounts.items()
         }
         self.occupied_days = {"A": 10, "B": 20, "C": 30, "D": 15, "E": 25, "F": 5}
@@ -215,11 +249,55 @@ class TestExcelParityWaterExample(unittest.TestCase):
         self.assertEqual(754 - tenant_total, 669)
 
 
+class TestExcelParityElectricityExample(unittest.TestCase):
+    """對照房東 Excel 更新版「電費分攤」工作表的真實範例（含期末度數），
+    確保公電依「人數 x 電費計費天數」分攤的結果與 Excel 完全一致。
+    """
+
+    def test_matches_landlord_spreadsheet_reference_period(self):
+        rooms, _ = load_rooms_config()
+        electricity_period_start = date(2026, 6, 17)
+        electricity_period_end = date(2026, 8, 18)
+        initial_readings = {
+            "3A": 49, "3B": 106, "4C": 458, "4D": 54, "5E": 418, "6F": 357,
+        }
+        new_readings = {
+            "3A": 183, "3B": 255, "4C": 919, "4D": 308, "5E": 874, "6F": 809,
+        }
+
+        result = calculate_electricity(
+            rooms,
+            initial_readings,
+            new_readings,
+            unit_price=6.22,
+            total_electricity_bill=21040.0,
+            electricity_period_start=electricity_period_start,
+            electricity_period_end=electricity_period_end,
+        )
+
+        # Excel H13:H18（使用天數）= 55, 61, 62, 55, 62, 62
+        self.assertEqual(result["3A"]["usage_days"], 55)
+        self.assertEqual(result["3B"]["usage_days"], 61)
+        self.assertEqual(result["4C"]["usage_days"], 62)
+        self.assertEqual(result["4D"]["usage_days"], 55)
+        self.assertEqual(result["5E"]["usage_days"], 62)
+        self.assertEqual(result["6F"]["usage_days"], 62)
+
+        # Excel K13:K18（應收電費）= 1899, 2109, 4069, 3711, 5239, 4013
+        self.assertEqual(result["3A"]["electricity_fee"], 1899)
+        self.assertEqual(result["3B"]["electricity_fee"], 2109)
+        self.assertEqual(result["4C"]["electricity_fee"], 4069)
+        self.assertEqual(result["4D"]["electricity_fee"], 3711)
+        self.assertEqual(result["5E"]["electricity_fee"], 5239)
+        self.assertEqual(result["6F"]["electricity_fee"], 4013)
+
+
 class TestCalculateAllConservation(unittest.TestCase):
     def test_total_conservation_across_real_rooms_config(self):
         """整合測試：室友應繳水費總額 + 房東吸收的基本費 = 水費帳單總額。"""
         rooms, billing_end_date = load_rooms_config()
 
+        initial_readings = {"3A": 49, "3B": 106, "4C": 458, "4D": 54, "5E": 418, "6F": 357}
         new_readings = {
             "3A": 49 + 100,
             "3B": 106 + 200,
@@ -232,17 +310,20 @@ class TestCalculateAllConservation(unittest.TestCase):
         total_electricity_bill = 5000.0
         total_water_base_fee = 1200.0
         total_water_usage_fee = 3000.0
-        full_period_days = 90  # 假設本期帳單完整計費區間長度，需依實際台水帳單調整
+        water_period_start = date(2026, 6, 9)
 
         summary = calculate_all(
             rooms,
-            billing_end_date,
+            initial_readings,
             new_readings,
             unit_price,
             total_electricity_bill,
+            date(2026, 6, 17),
+            date(2026, 8, 18),
             total_water_base_fee,
             total_water_usage_fee,
-            full_period_days,
+            water_period_start,
+            billing_end_date,
         )
 
         landlord_absorbed = summary.pop("__landlord_absorbed_base_fee__")
@@ -259,8 +340,8 @@ class TestCalculateAllConservation(unittest.TestCase):
 
 
 class TestGenerateLineMessage(unittest.TestCase):
-    def test_message_contains_every_room_and_matches_totals(self):
-        rooms, billing_end_date = load_rooms_config()
+    def _build_summary(self, rooms, billing_end_date):
+        initial_readings = {"3A": 49, "3B": 106, "4C": 458, "4D": 54, "5E": 418, "6F": 357}
         new_readings = {
             "3A": 49 + 100,
             "3B": 106 + 200,
@@ -269,23 +350,33 @@ class TestGenerateLineMessage(unittest.TestCase):
             "5E": 418 + 400,
             "6F": 357 + 120,
         }
-        summary = calculate_all(
+        return calculate_all(
             rooms,
-            billing_end_date,
+            initial_readings,
             new_readings,
-            unit_price=4.0,
-            total_electricity_bill=5000.0,
-            total_water_base_fee=1200.0,
-            total_water_usage_fee=3000.0,
-            full_period_days=90,
+            4.0,
+            5000.0,
+            date(2026, 6, 17),
+            date(2026, 8, 18),
+            1200.0,
+            3000.0,
+            date(2026, 6, 9),
+            billing_end_date,
         )
+
+    def test_message_contains_every_room_and_matches_totals(self):
+        rooms, billing_end_date = load_rooms_config()
+        summary = self._build_summary(rooms, billing_end_date)
 
         message = generate_line_message(
             summary,
-            billing_start_date=date(2026, 6, 19),
-            billing_end_date=billing_end_date,
+            water_period_start=date(2026, 6, 19),
+            water_period_end=billing_end_date,
             remittance_account="1234-5678-9999",
             due_date=date(2026, 8, 25),
+            electricity_period_start=date(2026, 6, 17),
+            electricity_period_end=date(2026, 8, 18),
+            meter_reading_date=date(2026, 8, 19),
         )
 
         for room_id, info in summary.items():
@@ -299,6 +390,24 @@ class TestGenerateLineMessage(unittest.TestCase):
         self.assertIn("8/25", message)
         self.assertIn("6/19", message)
         self.assertIn("8/19", message)
+        self.assertIn("水費計費區間", message)
+        self.assertIn("電費計費區間", message)
+        self.assertIn("6/17", message)
+        self.assertIn("8/18", message)
+
+    def test_electricity_period_omitted_when_not_provided(self):
+        rooms, billing_end_date = load_rooms_config()
+        summary = self._build_summary(rooms, billing_end_date)
+
+        message = generate_line_message(
+            summary,
+            water_period_start=date(2026, 6, 19),
+            water_period_end=billing_end_date,
+            remittance_account="1234-5678-9999",
+            due_date=date(2026, 8, 25),
+        )
+
+        self.assertNotIn("電費計費區間", message)
 
 
 if __name__ == "__main__":

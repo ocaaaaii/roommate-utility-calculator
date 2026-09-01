@@ -2,6 +2,7 @@
 
 對應 skill.md 階段二、三：表單輸入 + 分帳結果表格 + 一鍵複製 LINE 通知文字。
 """
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -153,54 +154,113 @@ st.caption("透天厝分租套房水電分帳小工具 — 電費依用電量分
 st.markdown("---")
 
 with st.form("bill_form"):
-    st.markdown('<span class="section-tag">帳單金額</span>', unsafe_allow_html=True)
-    col1, col1b, col2, col3 = st.columns(4)
-    with col1:
-        total_electricity_bill = st.number_input(
-            "台電總電費 (元)", min_value=0.0, step=100.0, value=0.0
+    st.markdown('<span class="section-tag">房客異動</span>', unsafe_allow_html=True)
+    st.caption(
+        "平常不需要打開這個區塊。只有在有人搬入/搬出、換人、或人數變動時才需要調整；"
+        "其餘每期照常只要填下面的帳單金額與電表度數就好。"
+    )
+    with st.expander("展開以修改房客資料（簽約日／入住日／退租日／人數）"):
+        room_overrides = {}
+        for room_id, room in rooms.items():
+            st.markdown(f"**{room_id}**")
+            oc1, oc2, oc3, oc4 = st.columns(4)
+            with oc1:
+                o_contract_date = st.date_input(
+                    "簽約日", value=room.contract_date, key=f"contract_{room_id}"
+                )
+            with oc2:
+                o_move_in_date = st.date_input(
+                    "實際入住日", value=room.move_in_date, key=f"movein_{room_id}"
+                )
+            with oc3:
+                o_move_out_date = st.date_input(
+                    "退租日（尚未退租可留原值）",
+                    value=room.move_out_date,
+                    key=f"moveout_{room_id}",
+                )
+            with oc4:
+                o_headcount = st.number_input(
+                    "人數", min_value=1, max_value=4, value=room.headcount,
+                    step=1, key=f"headcount_{room_id}",
+                )
+            room_overrides[room_id] = {
+                "contract_date": o_contract_date,
+                "move_in_date": o_move_in_date,
+                "move_out_date": o_move_out_date,
+                "headcount": o_headcount,
+            }
+
+    st.markdown('<span class="section-tag">電費資訊</span>', unsafe_allow_html=True)
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
+        electricity_period_start = st.date_input(
+            "電費帳單期間開始", value=date(2026, 6, 17)
         )
-    with col1b:
+    with col_e2:
+        electricity_period_end = st.date_input(
+            "電費帳單期間結束", value=date(2026, 8, 18)
+        )
+    with col_e3:
+        meter_reading_date = st.date_input("抄表日", value=date(2026, 8, 19))
+
+    col_e4, col_e5 = st.columns(2)
+    with col_e4:
+        total_electricity_bill = st.number_input(
+            "本期總電費 (元)", min_value=0.0, step=100.0, value=0.0
+        )
+    with col_e5:
         unit_price = st.number_input(
-            "當期每度電價 (元/度)", min_value=0.0, step=0.1, value=0.0,
+            "當期每度平均電價 (元/度)", min_value=0.0, step=0.1, value=0.0,
             help="以台電帳單上的每度電價填入，用來計算各房自家用電費用；"
             "總電費扣除各房自家用電費後的公電（公共用電）將依人數比例分攤。",
         )
-    with col2:
-        total_water_base_fee = st.number_input(
-            "台水總基本費 (元)", min_value=0.0, step=10.0, value=0.0
-        )
-    with col3:
-        total_water_usage_fee = st.number_input(
-            "台水總用水費（含水源保育費）(元)", min_value=0.0, step=100.0, value=0.0
-        )
 
-    st.markdown('<span class="section-tag">水費計費區間</span>', unsafe_allow_html=True)
+    st.markdown('<span class="section-tag">水費資訊</span>', unsafe_allow_html=True)
     st.caption(
-        "水費基本費與用水費是依這個區間依天數分攤，請直接照台水帳單上「用水計費期間」欄位填寫；"
-        "台水與台電是不同單位、抄表週期本來就不一樣，不需要跟電表抄表日對齊。"
+        "計費開始日／結束日請直接照台水帳單上「用水計費期間」欄位填寫；"
+        "台水與台電是不同單位、抄表週期本來就不一樣，不需要對齊。"
     )
-    col4, col5 = st.columns(2)
-    with col4:
-        billing_period_start = st.date_input(
-            "水費計費起始日（台水帳單「用水計費期間」開始）", value=date(2026, 6, 9)
-        )
-    with col5:
-        billing_end_date = st.date_input(
-            "水費計費結束日（台水帳單「用水計費期間」結束）", value=date(2026, 8, 5)
-        )
+    col_w1, col_w2 = st.columns(2)
+    with col_w1:
+        water_period_start = st.date_input("計費開始日", value=date(2026, 6, 9))
+    with col_w2:
+        water_period_end = st.date_input("計費結束日", value=date(2026, 8, 5))
 
-    st.markdown('<span class="section-tag">6 間房新電表度數</span>', unsafe_allow_html=True)
+    col_w3, col_w4, col_w5 = st.columns(3)
+    with col_w3:
+        total_water_base_fee = st.number_input(
+            "基本費 (元)", min_value=0.0, step=10.0, value=0.0
+        )
+    with col_w4:
+        water_usage_fee = st.number_input(
+            "用水費 (元)", min_value=0.0, step=10.0, value=0.0
+        )
+    with col_w5:
+        water_conservation_fee = st.number_input(
+            "水源保育與回饋費 (元)", min_value=0.0, step=1.0, value=0.0
+        )
+    total_water_usage_fee = water_usage_fee + water_conservation_fee
+
+    st.markdown('<span class="section-tag">6 間房電表度數</span>', unsafe_allow_html=True)
+    st.caption(
+        "「起始度數」預設帶入上一期存的度數，若你手邊記的是上一期期末度數，直接覆蓋成那個數字即可；"
+        "這樣下一期也只要換數字繼續用，不需要改設定檔。"
+    )
+    initial_readings = {}
     new_readings = {}
     reading_cols = st.columns(3)
     for i, (room_id, room) in enumerate(rooms.items()):
         with reading_cols[i % 3]:
-            headcount_note = f"（{room.headcount}人）" if room.headcount == 2 else ""
+            headcount_note = f"（{room_overrides[room_id]['headcount']}人）" if room_overrides[room_id]["headcount"] == 2 else ""
+            st.markdown(f"{room_id}{headcount_note}")
+            initial_readings[room_id] = st.number_input(
+                "起始度數", min_value=0.0, value=float(room.initial_reading),
+                step=1.0, key=f"initial_{room_id}",
+            )
             new_readings[room_id] = st.number_input(
-                f"{room_id}{headcount_note}（初始 {room.initial_reading:g}）",
-                min_value=float(room.initial_reading),
-                value=float(room.initial_reading),
-                step=1.0,
-                key=f"reading_{room_id}",
+                "期末度數", min_value=float(initial_readings[room_id]),
+                value=float(initial_readings[room_id]),
+                step=1.0, key=f"reading_{room_id}",
             )
 
     st.markdown('<span class="section-tag">通知訊息設定</span>', unsafe_allow_html=True)
@@ -218,21 +278,35 @@ with st.form("bill_form"):
     submitted = st.form_submit_button("開始計算分帳")
 
 if submitted:
-    full_period_days = (billing_end_date - billing_period_start).days + 1
+    working_rooms = {
+        room_id: replace(
+            room,
+            contract_date=room_overrides[room_id]["contract_date"],
+            move_in_date=room_overrides[room_id]["move_in_date"],
+            move_out_date=room_overrides[room_id]["move_out_date"],
+            headcount=room_overrides[room_id]["headcount"],
+        )
+        for room_id, room in rooms.items()
+    }
     summary = calculate_all(
-        rooms,
-        billing_end_date,
+        working_rooms,
+        initial_readings,
         new_readings,
         unit_price,
         total_electricity_bill,
+        electricity_period_start,
+        electricity_period_end,
         total_water_base_fee,
         total_water_usage_fee,
-        full_period_days,
-        billing_period_start,
+        water_period_start,
+        water_period_end,
     )
     st.session_state["summary"] = summary
-    st.session_state["billing_period_start"] = billing_period_start
-    st.session_state["billing_end_date"] = billing_end_date
+    st.session_state["water_period_start"] = water_period_start
+    st.session_state["water_period_end"] = water_period_end
+    st.session_state["electricity_period_start"] = electricity_period_start
+    st.session_state["electricity_period_end"] = electricity_period_end
+    st.session_state["meter_reading_date"] = meter_reading_date
     st.session_state["remittance_account"] = remittance_account
     st.session_state["due_date"] = due_date
 
@@ -244,14 +318,15 @@ if "summary" in st.session_state:
     st.markdown("## 分帳結果")
     st.caption(
         f"本期公電（公共用電）總額約 ${public_electricity:,.0f}，"
-        "已依各房人數比例分攤進電費欄位；水費與電費最終金額四捨五入到整數元。"
+        "已依各房「人數 x 電費計費天數」加權分攤進電費欄位；水費與電費最終金額四捨五入到整數元。"
     )
 
     rows = [
         {
             "房號": room_id,
             "人數": info["headcount"],
-            "入住天數": info["occupied_days"],
+            "水費入住天數": info["occupied_days"],
+            "電費計費天數": info["electricity_usage_days"],
             "用電度數": info["electricity_usage_kwh"],
             "電費": info["electricity_fee"],
             "水費": info["water_fee"],
@@ -288,9 +363,12 @@ if "summary" in st.session_state:
     st.markdown("## 一鍵複製 LINE 群組通知")
     message = generate_line_message(
         summary,
-        billing_start_date=st.session_state["billing_period_start"],
-        billing_end_date=st.session_state["billing_end_date"],
+        water_period_start=st.session_state["water_period_start"],
+        water_period_end=st.session_state["water_period_end"],
         remittance_account=st.session_state["remittance_account"],
         due_date=st.session_state["due_date"],
+        electricity_period_start=st.session_state["electricity_period_start"],
+        electricity_period_end=st.session_state["electricity_period_end"],
+        meter_reading_date=st.session_state["meter_reading_date"],
     )
     st.code(message, language=None)

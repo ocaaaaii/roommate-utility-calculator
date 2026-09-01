@@ -1,8 +1,9 @@
 """室友水電分帳核心計算邏輯。
 
 對應房東「水電費分攤試算表」的計算規則（已對照該 Excel 之公式校準）：
-- 各房實際入住天數：計費區間頭尾皆計（結束日 - 開始日 + 1）
-- 電費：自家用電度數 x 每度電價；扣除各房自家電費後的「公電」依人數比例分攤
+- 各房實際入住天數（水費用）：計費區間頭尾皆計（結束日 - 開始日 + 1）
+- 電費：自家用電度數 x 每度電價；扣除各房自家電費後的「公電」依「人數 x 電費計費天數」權重分攤，
+  電費計費天數以「簽約日」（而非實際入住日）與電費帳單起始日兩者較晚者起算，不頭尾皆計
 - 水費基本費：先平分 6 房，再依「實際入住天數 / 滿額天數」比例分攤，未入住天數由房東吸收
 - 用水費及水源保育費：依「人數 x 實際入住天數」權重分攤
 - 每房最終水費 / 電費四捨五入到整數元（比照 Excel ROUND(x, 0)）
@@ -24,6 +25,7 @@ class Room:
     room_id: str
     name: str
     initial_reading: float
+    contract_date: date
     move_in_date: date
     headcount: int
     move_out_date: Optional[date] = None
@@ -40,6 +42,7 @@ def load_rooms_config(path: Path = CONFIG_PATH) -> tuple[Dict[str, Room], date]:
             room_id=room_id,
             name=info["name"],
             initial_reading=info["initial_reading"],
+            contract_date=date.fromisoformat(info["contract_date"]),
             move_in_date=date.fromisoformat(info["move_in_date"]),
             headcount=info["headcount"],
             move_out_date=date.fromisoformat(info["move_out_date"])
@@ -78,34 +81,63 @@ def calculate_occupied_days(
     return max(0, (end - start).days + 1)
 
 
+def calculate_electricity_usage_days(
+    contract_date: date,
+    electricity_period_start: date,
+    electricity_period_end: date,
+) -> int:
+    """計算某房間在電費計費區間內用於分攤「公電」的天數。
+
+    比照房東試算表：以簽約日（而非實際入住日）與電費帳單起始日兩者較晚者起算，
+    到電費帳單結束日為止，不像水費天數那樣頭尾皆計（不 +1）。
+    """
+    if electricity_period_start >= contract_date:
+        days = (electricity_period_end - electricity_period_start).days
+    else:
+        days = (electricity_period_end - contract_date).days
+    return max(0, days)
+
+
 def calculate_electricity(
     rooms: Dict[str, Room],
+    initial_readings: Dict[str, float],
     new_readings: Dict[str, float],
     unit_price: float,
     total_electricity_bill: float,
+    electricity_period_start: date,
+    electricity_period_end: date,
 ) -> Dict[str, dict]:
     """依各房電表用電度數 x 每度電價算出自家電費；總電費扣除各房自家電費後的
-    「公電」（公共用電，如走廊、抽水馬達等）依各房人數比例分攤。
+    「公電」（公共用電，如走廊、抽水馬達等）依「人數 x 電費計費天數」權重分攤。
+
+    initial_readings 是「本期起始度數」（即上一期的期末度數），由呼叫端每期自行提供，
+    不寫死在房間主檔裡，這樣下一期只要換上新數字就能繼續用，不需要改設定檔。
     """
     usages = {
-        room_id: new_readings[room_id] - room.initial_reading
-        for room_id, room in rooms.items()
+        room_id: new_readings[room_id] - initial_readings[room_id] for room_id in rooms
     }
     metered_fees = {room_id: usage * unit_price for room_id, usage in usages.items()}
     public_electricity = total_electricity_bill - sum(metered_fees.values())
-    total_headcount = sum(room.headcount for room in rooms.values())
+
+    usage_days = {
+        room_id: calculate_electricity_usage_days(
+            room.contract_date, electricity_period_start, electricity_period_end
+        )
+        for room_id, room in rooms.items()
+    }
+    weights = {room_id: room.headcount * usage_days[room_id] for room_id, room in rooms.items()}
+    total_weight = sum(weights.values())
 
     result: Dict[str, dict] = {}
     for room_id, room in rooms.items():
         public_share = (
-            public_electricity * room.headcount / total_headcount
-            if total_headcount
-            else 0.0
+            public_electricity * weights[room_id] / total_weight if total_weight else 0.0
         )
         raw_total = metered_fees[room_id] + public_share
         result[room_id] = {
             "usage_kwh": usages[room_id],
             "unit_price": unit_price,
+            "usage_days": usage_days[room_id],
             "metered_fee": metered_fees[room_id],
             "public_electricity_share": public_share,
             "electricity_fee": _round_half_up(raw_total),
@@ -160,14 +192,16 @@ def calculate_water_usage_fee(
 
 def calculate_all(
     rooms: Dict[str, Room],
-    billing_end_date: date,
+    initial_readings: Dict[str, float],
     new_readings: Dict[str, float],
     unit_price: float,
     total_electricity_bill: float,
+    electricity_period_start: date,
+    electricity_period_end: date,
     total_water_base_fee: float,
     total_water_usage_fee: float,
-    full_period_days: int,
-    billing_period_start: Optional[date] = None,
+    water_period_start: date,
+    water_period_end: date,
 ) -> Dict[str, dict]:
     """整合電費、水費，算出每房總計。
 
@@ -175,15 +209,25 @@ def calculate_all(
     比照房東試算表只在最終欄位 ROUND(x, 0)，不對中間欄位個別捨入。
     房東吸收的水費基本費以「水費帳單總額 - 各房水費四捨五入後加總」的餘數計算，
     確保室友應繳總額 + 房東吸收金額必定等於水費帳單總額。
+    水費與電費計費區間各自獨立（台水、台電是不同單位、不同抄表週期）。
     """
+    full_period_days = (water_period_end - water_period_start).days + 1
     occupied_days = {
         room_id: calculate_occupied_days(
-            room.move_in_date, billing_end_date, billing_period_start, room.move_out_date
+            room.move_in_date, water_period_end, water_period_start, room.move_out_date
         )
         for room_id, room in rooms.items()
     }
 
-    electricity = calculate_electricity(rooms, new_readings, unit_price, total_electricity_bill)
+    electricity = calculate_electricity(
+        rooms,
+        initial_readings,
+        new_readings,
+        unit_price,
+        total_electricity_bill,
+        electricity_period_start,
+        electricity_period_end,
+    )
     water_base = calculate_water_base_fee(
         rooms, occupied_days, total_water_base_fee, full_period_days
     )
@@ -203,6 +247,7 @@ def calculate_all(
             "headcount": room.headcount,
             "occupied_days": occupied_days[room_id],
             "electricity_usage_kwh": elec["usage_kwh"],
+            "electricity_usage_days": elec["usage_days"],
             "electricity_metered_fee": round(elec["metered_fee"], 2),
             "electricity_public_share": round(elec["public_electricity_share"], 2),
             "electricity_fee": elec["electricity_fee"],
@@ -220,18 +265,29 @@ def calculate_all(
 
 def generate_line_message(
     summary: Dict[str, dict],
-    billing_start_date: date,
-    billing_end_date: date,
+    water_period_start: date,
+    water_period_end: date,
     remittance_account: str,
     due_date: date,
+    electricity_period_start: Optional[date] = None,
+    electricity_period_end: Optional[date] = None,
+    meter_reading_date: Optional[date] = None,
 ) -> str:
     """依 calculate_all() 的結果，產生可一鍵複製的 LINE 群組通知文字。"""
     lines = [
         "【葫洲美好際寓 水電費通知】",
-        f"水費計費區間：{billing_start_date.month}/{billing_start_date.day} ~ "
-        f"{billing_end_date.month}/{billing_end_date.day}",
-        "",
+        f"水費計費區間：{water_period_start.month}/{water_period_start.day} ~ "
+        f"{water_period_end.month}/{water_period_end.day}",
     ]
+    if electricity_period_start and electricity_period_end:
+        line = (
+            f"電費計費區間：{electricity_period_start.month}/{electricity_period_start.day} ~ "
+            f"{electricity_period_end.month}/{electricity_period_end.day}"
+        )
+        if meter_reading_date:
+            line += f"（抄表日 {meter_reading_date.month}/{meter_reading_date.day}）"
+        lines.append(line)
+    lines.append("")
 
     for room_id, info in summary.items():
         if room_id.startswith("__"):
