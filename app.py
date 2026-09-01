@@ -128,16 +128,39 @@ st.markdown(
         color: var(--gray-brown-deep) !important;
     }
 
-    /* 分隔用的小標籤 */
-    .section-tag {
+    /* 分隔用的小標籤（必須用 !important，否則會被表單內「span 一律灰棕色」的規則蓋掉） */
+    .section-tag,
+    div[data-testid="stForm"] .section-tag {
         display: inline-block;
         background-color: var(--morandi-green-deep);
-        color: white;
+        color: #FFFFFF !important;
         padding: 0.15rem 0.7rem;
         border-radius: 999px;
         font-size: 0.85rem;
-        font-weight: 600;
+        font-weight: 700 !important;
         margin-bottom: 0.4rem;
+    }
+
+    /* 檔案上傳元件在表單外，會直接繼承頁面層級「米色文字配綠底」的樣式，
+       導致按鈕文字在白色按鈕底上變成看不見；改成跟表單卡片一致的配色 */
+    div[data-testid="stFileUploaderDropzone"] {
+        background-color: var(--beige) !important;
+        border: 1px dashed var(--border-soft) !important;
+        border-radius: 10px;
+    }
+    div[data-testid="stFileUploaderDropzone"] span,
+    div[data-testid="stFileUploaderDropzone"] small,
+    div[data-testid="stFileUploaderDropzone"] p,
+    div[data-testid="stFileUploaderDropzone"] div {
+        color: var(--gray-brown-deep) !important;
+    }
+    div[data-testid="stFileUploaderDropzone"] button {
+        background-color: var(--morandi-green-deep) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+    }
+    div[data-testid="stFileUploaderDropzone"] button span {
+        color: #FFFFFF !important;
     }
     </style>
     """,
