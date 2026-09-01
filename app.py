@@ -171,6 +171,13 @@ def _merge_history(records: list[dict]) -> None:
 if "history" not in st.session_state:
     st.session_state["history"] = []
 
+latest_record = (
+    max(st.session_state["history"], key=lambda r: r["electricity_period_end"])
+    if st.session_state["history"]
+    else None
+)
+latest_new_readings = latest_record["inputs"]["new_readings"] if latest_record else {}
+
 # ---------------------------------------------------------------------------
 # 資料
 # ---------------------------------------------------------------------------
@@ -182,7 +189,7 @@ st.caption("透天厝分租套房水電分帳小工具 — 電費依用電量分
 st.markdown('<span class="section-tag">歷史紀錄</span>', unsafe_allow_html=True)
 st.caption(
     "app 重新部署或閒置太久重啟時，伺服器上的資料會清空，歷史紀錄請自行下載保存。"
-    "下次要接續使用時，把上次下載的檔案上傳回來，之前算過的期數就會全部帶回來。"
+    "下次要接續使用時，把上次下載的檔案上傳回來，之前算過的期數（含最新一期的電表度數）就會全部帶回來。"
 )
 uploaded_history = st.file_uploader(
     "上傳先前下載的歷史紀錄（JSON，選填）", type="json", key="history_upload"
@@ -286,8 +293,8 @@ with st.form("bill_form"):
 
     st.markdown('<span class="section-tag">6 間房電表度數</span>', unsafe_allow_html=True)
     st.caption(
-        "「起始度數」預設帶入上一期存的度數，若你手邊記的是上一期期末度數，直接覆蓋成那個數字即可；"
-        "這樣下一期也只要換數字繼續用，不需要改設定檔。"
+        "「起始度數」已經自動帶入歷史紀錄裡上一期的期末度數（第一次使用、或還沒有歷史紀錄時，"
+        "才會退回設定檔裡的預設值）；如果數字不對可以直接覆蓋，不需要改設定檔。"
     )
     initial_readings = {}
     new_readings = {}
@@ -296,8 +303,9 @@ with st.form("bill_form"):
         with reading_cols[i % 3]:
             headcount_note = f"（{room_overrides[room_id]['headcount']}人）" if room_overrides[room_id]["headcount"] == 2 else ""
             st.markdown(f"{room_id}{headcount_note}")
+            default_initial_reading = latest_new_readings.get(room_id, room.initial_reading)
             initial_readings[room_id] = st.number_input(
-                "起始度數", min_value=0.0, value=float(room.initial_reading),
+                "起始度數", min_value=0.0, value=float(default_initial_reading),
                 step=1.0, key=f"initial_{room_id}",
             )
             new_readings[room_id] = st.number_input(
