@@ -145,7 +145,7 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # 資料
 # ---------------------------------------------------------------------------
-rooms, default_billing_end_date = load_rooms_config()
+rooms, _ = load_rooms_config()
 
 st.markdown("# 葫洲美好際寓 水電分帳試算")
 st.caption("透天厝分租套房水電分帳小工具 — 電費依用電量分攤，水費依天數與人數加權分攤。")
@@ -174,19 +174,19 @@ with st.form("bill_form"):
             "台水總用水費（含水源保育費）(元)", min_value=0.0, step=100.0, value=0.0
         )
 
-    st.markdown('<span class="section-tag">計費區間</span>', unsafe_allow_html=True)
+    st.markdown('<span class="section-tag">水費計費區間</span>', unsafe_allow_html=True)
     st.caption(
-        "上次帳單（水費繳費期限 2026-07-08，金額 754；電費繳費期限 2026-07-14，金額 2274）"
-        "由房東支付。初始抄表日期為 7/3，室友分帳將從本期（7/3 ~ 8/19）開始試算。"
+        "水費基本費與用水費是依這個區間依天數分攤，請直接照台水帳單上「用水計費期間」欄位填寫；"
+        "台水與台電是不同單位、抄表週期本來就不一樣，不需要跟電表抄表日對齊。"
     )
     col4, col5 = st.columns(2)
     with col4:
         billing_period_start = st.date_input(
-            "本期帳單起始日（上次抄表日）", value=date(2026, 7, 3)
+            "水費計費起始日（台水帳單「用水計費期間」開始）", value=date(2026, 6, 9)
         )
     with col5:
         billing_end_date = st.date_input(
-            "本期抄表截止日", value=default_billing_end_date
+            "水費計費結束日（台水帳單「用水計費期間」結束）", value=date(2026, 8, 5)
         )
 
     st.markdown('<span class="section-tag">6 間房新電表度數</span>', unsafe_allow_html=True)

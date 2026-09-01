@@ -228,7 +228,7 @@ def generate_line_message(
     """依 calculate_all() 的結果，產生可一鍵複製的 LINE 群組通知文字。"""
     lines = [
         "【葫洲美好際寓 水電費通知】",
-        f"計算區間：{billing_start_date.month}/{billing_start_date.day} ~ "
+        f"水費計費區間：{billing_start_date.month}/{billing_start_date.day} ~ "
         f"{billing_end_date.month}/{billing_end_date.day}",
         "",
     ]
